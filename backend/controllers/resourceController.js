@@ -1,26 +1,50 @@
 const path = require('path');
 const fs = require('fs');
+const { Readable } = require('stream');
+const mongoose = require('mongoose');
 const multer = require('multer');
 const Resource = require('../models/Resource');
 const User = require('../models/User');
 
-// Ensure uploads directory exists
+// Helper to get or initialize MongoDB GridFSBucket
+let gridfsBucket = null;
+const getGridFSBucket = () => {
+  if (!gridfsBucket && mongoose.connection && mongoose.connection.db) {
+    gridfsBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+      bucketName: 'uploads',
+    });
+  }
+  return gridfsBucket;
+};
+
+// Stream a buffer directly into MongoDB Atlas GridFS for permanent cloud storage
+const uploadToGridFS = (file) => {
+  return new Promise((resolve, reject) => {
+    const bucket = getGridFSBucket();
+    if (!bucket) {
+      return reject(new Error('GridFS bucket not available. Database not connected.'));
+    }
+    const uploadStream = bucket.openUploadStream(file.originalname, {
+      contentType: file.mimetype,
+    });
+    uploadStream.on('error', (err) => reject(err));
+    uploadStream.on('finish', () => resolve(uploadStream.id));
+
+    const readable = new Readable();
+    readable.push(file.buffer);
+    readable.push(null);
+    readable.pipe(uploadStream);
+  });
+};
+
+// Ensure local uploads directory exists (used for fast cache and legacy fallback)
 const uploadDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer Storage Configuration (Clean & Local, swappable for Cloud/Supabase later)
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
-  },
-});
+// Multer Storage: memoryStorage so file buffer can be streamed to MongoDB Atlas GridFS
+const storage = multer.memoryStorage();
 
 // File filter for academic files: PDF, DOC, DOCX, PPT, PPTX, TXT
 const fileFilter = (req, file, cb) => {
@@ -218,13 +242,28 @@ const createResource = async (req, res) => {
     const { title, description, department, year, semester, subject, type } = req.body;
 
     if (!title || !department || !year || !semester || !subject || !type) {
-      if (req.file && fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
       return res.status(400).json({
         success: false,
         message: 'Please provide all required fields (title, department, year, semester, subject, type)',
       });
+    }
+
+    // 1. Permanently store the file in MongoDB Atlas GridFS
+    let gridfsId = null;
+    try {
+      gridfsId = await uploadToGridFS(req.file);
+    } catch (gridFsErr) {
+      console.error('GridFS upload failed, fallback to local file only:', gridFsErr);
+    }
+
+    // 2. Also write a local cached copy in uploadDir
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const localFileName = `file-${uniqueSuffix}${path.extname(req.file.originalname)}`;
+    const localFullPath = path.join(uploadDir, localFileName);
+    try {
+      fs.writeFileSync(localFullPath, req.file.buffer);
+    } catch (writeErr) {
+      console.warn('Local cache write skipped:', writeErr.message);
     }
 
     const resource = await Resource.create({
@@ -236,7 +275,8 @@ const createResource = async (req, res) => {
       subject,
       type,
       fileName: req.file.originalname,
-      filePath: req.file.filename,
+      filePath: localFileName,
+      gridfsId: gridfsId,
       fileSize: req.file.size,
       fileMimeType: req.file.mimetype,
       uploadedBy: req.user._id,
@@ -255,11 +295,6 @@ const createResource = async (req, res) => {
     });
   } catch (error) {
     console.error('CreateResource error:', error);
-    if (req.file && fs.existsSync(req.file.path)) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (e) {}
-    }
     return res.status(500).json({
       success: false,
       message: error.message || 'Server error uploading resource',
@@ -285,7 +320,38 @@ const downloadResource = async (req, res) => {
     resource.downloads += 1;
     await resource.save();
 
-    // Check if filePath is absolute or relative to uploads/
+    const cleanFileName = resource.fileName || `${resource.title.replace(/\s+/g, '_')}.pdf`;
+
+    // 1. Check if the file is permanently stored in MongoDB Atlas GridFS
+    if (resource.gridfsId) {
+      const bucket = getGridFSBucket();
+      if (bucket) {
+        try {
+          const files = await bucket.find({ _id: new mongoose.Types.ObjectId(resource.gridfsId) }).toArray();
+          if (files && files.length > 0) {
+            const fileDoc = files[0];
+            let mimeType = resource.fileMimeType || fileDoc.contentType || 'application/octet-stream';
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(cleanFileName)}"`);
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type');
+
+            const downloadStream = bucket.openDownloadStream(new mongoose.Types.ObjectId(resource.gridfsId));
+            downloadStream.on('error', (streamErr) => {
+              console.error('GridFS stream error in download:', streamErr);
+              if (!res.headersSent) {
+                res.status(500).json({ success: false, message: 'Error downloading file from cloud' });
+              }
+            });
+            return downloadStream.pipe(res);
+          }
+        } catch (findErr) {
+          console.warn('GridFS find error in download, checking disk fallback:', findErr.message);
+        }
+      }
+    }
+
+    // 2. Fallback to local disk (for legacy files or local cache)
     let fullFilePath = path.isAbsolute(resource.filePath)
       ? resource.filePath
       : path.join(uploadDir, resource.filePath);
@@ -311,9 +377,6 @@ const downloadResource = async (req, res) => {
 
     // Expose Content-Disposition header for CORS/browser readers
     res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-    
-    // Ensure filename has proper extension
-    const cleanFileName = resource.fileName || `${resource.title.replace(/\s+/g, '_')}.pdf`;
 
     return res.download(fullFilePath, cleanFileName, (err) => {
       if (err) {
@@ -388,6 +451,18 @@ const deleteResource = async (req, res) => {
       });
     }
 
+    // Delete file from MongoDB Atlas GridFS if present
+    if (resource.gridfsId) {
+      const bucket = getGridFSBucket();
+      if (bucket) {
+        try {
+          await bucket.delete(new mongoose.Types.ObjectId(resource.gridfsId));
+        } catch (gridErr) {
+          console.warn('GridFS delete error:', gridErr.message);
+        }
+      }
+    }
+
     // Delete the file from local uploads folder if it exists
     if (resource.filePath) {
       const fullFilePath = path.isAbsolute(resource.filePath)
@@ -428,6 +503,41 @@ const previewResource = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Resource not found' });
     }
 
+    // 1. Check if the file is permanently stored in MongoDB Atlas GridFS
+    if (resource.gridfsId) {
+      const bucket = getGridFSBucket();
+      if (bucket) {
+        try {
+          const files = await bucket.find({ _id: new mongoose.Types.ObjectId(resource.gridfsId) }).toArray();
+          if (files && files.length > 0) {
+            const fileDoc = files[0];
+            let mimeType = resource.fileMimeType || fileDoc.contentType || 'application/pdf';
+            const ext = path.extname(resource.fileName || fileDoc.filename || '').toLowerCase().replace('.', '');
+            if (ext === 'pdf') mimeType = 'application/pdf';
+            else if (ext === 'txt') mimeType = 'text/plain';
+            else if (ext === 'ppt' || ext === 'pptx') mimeType = 'application/vnd.ms-powerpoint';
+
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Content-Disposition', 'inline');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type');
+
+            const downloadStream = bucket.openDownloadStream(new mongoose.Types.ObjectId(resource.gridfsId));
+            downloadStream.on('error', (streamErr) => {
+              console.error('GridFS stream error in preview:', streamErr);
+              if (!res.headersSent) {
+                res.status(500).json({ success: false, message: 'Error streaming file from cloud' });
+              }
+            });
+            return downloadStream.pipe(res);
+          }
+        } catch (findErr) {
+          console.warn('GridFS find error in preview, checking disk fallback:', findErr.message);
+        }
+      }
+    }
+
+    // 2. Fallback to local disk (for legacy files or local cache)
     let fullFilePath = path.isAbsolute(resource.filePath)
       ? resource.filePath
       : path.join(uploadDir, resource.filePath);

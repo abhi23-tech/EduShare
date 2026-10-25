@@ -44,7 +44,11 @@ const resourceSchema = new mongoose.Schema(
     },
     filePath: {
       type: String,
-      required: [true, 'File path is required'],
+      default: '',
+    },
+    gridfsId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
     },
     fileSize: {
       type: Number,
