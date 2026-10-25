@@ -18,6 +18,7 @@ app.use(
     origin: '*', // Allow all origins for dev/review
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Content-Disposition'],
+    exposedHeaders: ['Content-Disposition', 'Content-Type'],
   })
 );
 app.use(express.json());

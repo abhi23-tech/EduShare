@@ -445,13 +445,17 @@ const previewResource = async (req, res) => {
     else if (!mimeType) mimeType = 'application/pdf';
 
     res.setHeader('Content-Type', mimeType);
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="${encodeURIComponent(resource.fileName || resource.title)}"`
-    );
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type');
 
     const fileStream = fs.createReadStream(fullFilePath);
+    fileStream.on('error', (err) => {
+      console.error('File stream error in preview:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: 'Error streaming file' });
+      }
+    });
     fileStream.pipe(res);
   } catch (error) {
     console.error('PreviewResource error:', error);

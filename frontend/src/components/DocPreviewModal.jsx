@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Download,
@@ -9,21 +9,87 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
-import { API_BASE_URL } from '../api/api';
+import api, { API_BASE_URL } from '../api/api';
 
 const DocPreviewModal = ({ resource, isOpen, onClose, onDownload }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [blobUrl, setBlobUrl] = useState(null);
+
+  const fileExt = resource?.fileName?.split('.').pop()?.toLowerCase() || 'pdf';
+  const isPdf = fileExt === 'pdf';
+  const isOfficeDoc = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].includes(fileExt);
+  const directPreviewUrl = resource ? `${API_BASE_URL}/resources/preview/${resource._id}` : '';
+
+  useEffect(() => {
+    if (!isOpen || !resource) {
+      setBlobUrl(null);
+      setLoading(false);
+      return;
+    }
+
+    // Office formats cannot be natively displayed inside browser PDF viewers
+    if (isOfficeDoc) {
+      setLoading(false);
+      setLoadError(true);
+      setErrorMessage(`Preview is not supported directly for ${fileExt.toUpperCase()} files. Please download to view.`);
+      return;
+    }
+
+    let isMounted = true;
+    let createdUrl = null;
+
+    setLoading(true);
+    setLoadError(false);
+    setErrorMessage('');
+
+    const fetchPreview = async () => {
+      try {
+        const response = await api.get(`/resources/preview/${resource._id}`, {
+          responseType: 'blob',
+        });
+
+        if (!isMounted) return;
+
+        const contentType = response.headers['content-type'] || (isPdf ? 'application/pdf' : 'text/plain');
+        const blob = new Blob([response.data], { type: contentType });
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
+        setLoading(false);
+      } catch (err) {
+        console.error('Preview load error:', err);
+        if (isMounted) {
+          setLoadError(true);
+          setLoading(false);
+          setErrorMessage('Could not load document preview. You can download the file directly.');
+        }
+      }
+    };
+
+    fetchPreview();
+
+    return () => {
+      isMounted = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [isOpen, resource?._id]);
 
   if (!isOpen || !resource) return null;
 
-  const fileExt = resource.fileName?.split('.').pop()?.toLowerCase() || 'pdf';
-  const isPdf = fileExt === 'pdf';
-  const previewUrl = `${API_BASE_URL}/resources/preview/${resource._id}`;
-
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
+  };
+
+  const handleOpenNewTab = () => {
+    if (blobUrl) {
+      window.open(blobUrl, '_blank');
+    } else {
+      window.open(directPreviewUrl, '_blank');
+    }
   };
 
   return (
@@ -54,7 +120,7 @@ const DocPreviewModal = ({ resource, isOpen, onClose, onDownload }) => {
           {/* Action Toolbar */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
-              onClick={() => window.open(previewUrl, '_blank')}
+              onClick={handleOpenNewTab}
               className="p-1.5 sm:p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
               title="Open in new tab"
             >
@@ -93,8 +159,8 @@ const DocPreviewModal = ({ resource, isOpen, onClose, onDownload }) => {
         <div className="flex-1 relative bg-zinc-100 overflow-hidden flex items-center justify-center">
           {loading && !loadError && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-50 z-10 gap-3">
-              <Loader2 className="w-8 h-8 text-zinc-700 animate-spin" />
-              <p className="text-xs font-semibold text-zinc-500">Loading document preview...</p>
+              <Loader2 className="w-8 h-8 text-cyan-600 animate-spin" />
+              <p className="text-xs font-semibold text-zinc-600">Loading document preview...</p>
             </div>
           )}
 
@@ -103,7 +169,7 @@ const DocPreviewModal = ({ resource, isOpen, onClose, onDownload }) => {
               <AlertCircle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
               <h4 className="font-bold text-zinc-900 text-base mb-1">Preview Unavailable</h4>
               <p className="text-xs text-zinc-600 mb-5">
-                This file format ({fileExt.toUpperCase()}) cannot be rendered directly in the embedded viewer, or is protected by browser policies.
+                {errorMessage || `This file format (${fileExt.toUpperCase()}) cannot be rendered directly in the embedded viewer, or is protected by browser policies.`}
               </p>
               {onDownload && (
                 <button
@@ -115,18 +181,13 @@ const DocPreviewModal = ({ resource, isOpen, onClose, onDownload }) => {
                 </button>
               )}
             </div>
-          ) : (
+          ) : blobUrl ? (
             <iframe
-              src={previewUrl}
+              src={blobUrl}
               title={`Preview of ${resource.title}`}
               className="w-full h-full border-0 bg-white"
-              onLoad={() => setLoading(false)}
-              onError={() => {
-                setLoading(false);
-                setLoadError(true);
-              }}
             />
-          )}
+          ) : null}
         </div>
       </div>
     </div>
