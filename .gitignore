@@ -38,6 +38,7 @@ backend/uploads/*
 .vscode/
 .idea/
 
-# Archives
+# Archives & Local Backups
 *.zip
 EduShare-Demo.zip
+backend/data_backup/

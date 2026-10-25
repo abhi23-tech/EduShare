@@ -9,6 +9,7 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
+import { API_BASE_URL } from '../api/api';
 
 const DocPreviewModal = ({ resource, isOpen, onClose, onDownload }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -19,7 +20,7 @@ const DocPreviewModal = ({ resource, isOpen, onClose, onDownload }) => {
 
   const fileExt = resource.fileName?.split('.').pop()?.toLowerCase() || 'pdf';
   const isPdf = fileExt === 'pdf';
-  const previewUrl = `/api/resources/preview/${resource._id}`;
+  const previewUrl = `${API_BASE_URL}/resources/preview/${resource._id}`;
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);

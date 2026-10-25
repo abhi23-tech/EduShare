@@ -33,6 +33,7 @@ router.get('/admin/stats', protect, admin, getAdminStats);
 router.get('/:id', getResourceById);
 router.post('/', protect, upload.single('file'), createResource);
 router.get('/:id/download', downloadResource);
+router.get('/:id/preview', previewResource);
 router.delete('/:id', protect, deleteResource);
 
 // Bookmark & Review routes

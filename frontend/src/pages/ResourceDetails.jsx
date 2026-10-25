@@ -20,7 +20,7 @@ import {
   Send,
   AlertCircle,
 } from 'lucide-react';
-import api from '../api/api';
+import api, { API_BASE_URL } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import DocPreviewModal from '../components/DocPreviewModal';
 
@@ -163,7 +163,7 @@ const ResourceDetails = () => {
       setTimeout(() => setDownloadSuccess(false), 4000);
     } catch (err) {
       console.error('Download failed, using direct URL fallback:', err);
-      window.location.href = `http://localhost:5000/api/resources/${resource._id}/download`;
+      window.location.href = `${API_BASE_URL}/resources/${resource._id}/download`;
       setResource((prev) => ({
         ...prev,
         downloads: (prev.downloads || 0) + 1,

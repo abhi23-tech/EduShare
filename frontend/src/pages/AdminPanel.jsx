@@ -17,7 +17,7 @@ import {
   ArrowRight,
   AlertTriangle,
 } from 'lucide-react';
-import api from '../api/api';
+import api, { API_BASE_URL } from '../api/api';
 import { useAuth } from '../context/AuthContext';
 import DocPreviewModal from '../components/DocPreviewModal';
 
@@ -579,7 +579,7 @@ const AdminPanel = () => {
           isOpen={!!previewResource}
           onClose={() => setPreviewResource(null)}
           onDownload={() =>
-            (window.location.href = `/api/resources/${previewResource._id}/download`)
+            (window.location.href = `${API_BASE_URL}/resources/${previewResource._id}/download`)
           }
         />
       )}

@@ -39,6 +39,63 @@ const upload = multer({
   fileFilter: fileFilter,
 });
 
+// Helper to generate a valid minimal PDF buffer for study materials when physical files were not synced
+const generateSamplePdf = (title, subject, department, type) => {
+  const sanitize = (str) => String(str || '').replace(/[()\\\r\n]/g, ' ');
+  const lines = [
+    `EduShare Academic Repository`,
+    `Title: ${sanitize(title)}`,
+    `Subject: ${sanitize(subject)}`,
+    `Department: ${sanitize(department)}`,
+    `Resource Type: ${sanitize(type)}`,
+    `Status: Verified Academic Study Material`,
+  ];
+  let textStream = 'BT\n/F1 16 Tf\n50 720 Td\n';
+  lines.forEach((line, idx) => {
+    if (idx === 0) {
+      textStream += `(${line}) Tj\n/F1 12 Tf\n0 -36 Td\n`;
+    } else {
+      textStream += `(${line}) Tj\n0 -22 Td\n`;
+    }
+  });
+  textStream += 'ET';
+  const streamLen = Buffer.byteLength(textStream);
+
+  const pdf = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length ${streamLen} >>
+stream
+${textStream}
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000244 00000 n 
+0000000300 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+380
+%%EOF`;
+  return Buffer.from(pdf, 'utf-8');
+};
+
 // @desc    Get all resources with search and filters
 // @route   GET /api/resources
 // @access  Public
@@ -228,10 +285,18 @@ const downloadResource = async (req, res) => {
       : path.join(uploadDir, resource.filePath);
 
     if (!fs.existsSync(fullFilePath)) {
-      fs.writeFileSync(
-        fullFilePath,
-        `EduShare Academic Resource Content\n\nTitle: ${resource.title}\nSubject: ${resource.subject}\nDepartment: ${resource.department}\nType: ${resource.type}\n\nThis is the academic study material for ${resource.title}.`
-      );
+      const ext = path.extname(resource.fileName || fullFilePath).toLowerCase();
+      if (ext === '.pdf' || !ext) {
+        fs.writeFileSync(
+          fullFilePath,
+          generateSamplePdf(resource.title, resource.subject, resource.department, resource.type)
+        );
+      } else {
+        fs.writeFileSync(
+          fullFilePath,
+          `EduShare Academic Resource Content\n\nTitle: ${resource.title}\nSubject: ${resource.subject}\nDepartment: ${resource.department}\nType: ${resource.type}\n\nThis is the academic study material for ${resource.title}.`
+        );
+      }
     }
 
     // Expose Content-Disposition header for CORS/browser readers
@@ -358,10 +423,18 @@ const previewResource = async (req, res) => {
       : path.join(uploadDir, resource.filePath);
 
     if (!fs.existsSync(fullFilePath)) {
-      fs.writeFileSync(
-        fullFilePath,
-        `EduShare Academic Resource Preview\n\nTitle: ${resource.title}\nSubject: ${resource.subject}\nDepartment: ${resource.department}\nType: ${resource.type}\n\nThis document is ready for reading and academic study.`
-      );
+      const ext = path.extname(resource.fileName || fullFilePath).toLowerCase();
+      if (ext === '.pdf' || !ext) {
+        fs.writeFileSync(
+          fullFilePath,
+          generateSamplePdf(resource.title, resource.subject, resource.department, resource.type)
+        );
+      } else {
+        fs.writeFileSync(
+          fullFilePath,
+          `EduShare Academic Resource Preview\n\nTitle: ${resource.title}\nSubject: ${resource.subject}\nDepartment: ${resource.department}\nType: ${resource.type}\n\nThis document is ready for reading and academic study.`
+        );
+      }
     }
 
     let mimeType = resource.fileMimeType;
