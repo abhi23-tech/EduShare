@@ -41,4 +41,6 @@ backend/uploads/*
 # Archives & Local Backups
 *.zip
 EduShare-Demo.zip
+EduShare-Demo
+VIVA_PREPARATION_GUIDE.md
 backend/data_backup/

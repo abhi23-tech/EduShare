@@ -43,13 +43,15 @@ const upload = multer({
 const generateSamplePdf = (title, subject, department, type) => {
   const sanitize = (str) => String(str || '').replace(/[()\\\r\n]/g, ' ');
   const lines = [
-    `EduShare Academic Repository`,
+    'EduShare Academic Repository',
     `Title: ${sanitize(title)}`,
     `Subject: ${sanitize(subject)}`,
     `Department: ${sanitize(department)}`,
     `Resource Type: ${sanitize(type)}`,
-    `Status: Verified Academic Study Material`,
+    'Status: Verified Academic Study Material',
+    'Note: Physical file storage is managed by EduShare.'
   ];
+
   let textStream = 'BT\n/F1 16 Tf\n50 720 Td\n';
   lines.forEach((line, idx) => {
     if (idx === 0) {
@@ -59,41 +61,45 @@ const generateSamplePdf = (title, subject, department, type) => {
     }
   });
   textStream += 'ET';
-  const streamLen = Buffer.byteLength(textStream);
+  const streamBuf = Buffer.from(textStream, 'utf-8');
 
-  const pdf = `%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
-endobj
-4 0 obj
-<< /Length ${streamLen} >>
-stream
-${textStream}
-endstream
-endobj
-5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
-endobj
-xref
-0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000244 00000 n 
-0000000300 00000 n 
-trailer
-<< /Size 6 /Root 1 0 R >>
-startxref
-380
-%%EOF`;
-  return Buffer.from(pdf, 'utf-8');
+  const header = '%PDF-1.4\n';
+  const obj1 = '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n';
+  const obj2 = '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n';
+  const obj3 = '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n';
+  const obj4Start = `4 0 obj\n<< /Length ${streamBuf.length} >>\nstream\n`;
+  const obj4End = '\nendstream\nendobj\n';
+  const obj5 = '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n';
+
+  const off1 = Buffer.byteLength(header);
+  const off2 = off1 + Buffer.byteLength(obj1);
+  const off3 = off2 + Buffer.byteLength(obj2);
+  const off4 = off3 + Buffer.byteLength(obj3);
+  const off5 = off4 + Buffer.byteLength(obj4Start) + streamBuf.length + Buffer.byteLength(obj4End);
+
+  const pad = (n) => String(n).padStart(10, '0');
+  const xref = 'xref\n0 6\n0000000000 65535 f \n' +
+    `${pad(off1)} 00000 n \n` +
+    `${pad(off2)} 00000 n \n` +
+    `${pad(off3)} 00000 n \n` +
+    `${pad(off4)} 00000 n \n` +
+    `${pad(off5)} 00000 n \n`;
+
+  const startXrefOffset = off5 + Buffer.byteLength(obj5);
+  const trailer = `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${startXrefOffset}\n%%EOF\n`;
+
+  return Buffer.concat([
+    Buffer.from(header, 'utf-8'),
+    Buffer.from(obj1, 'utf-8'),
+    Buffer.from(obj2, 'utf-8'),
+    Buffer.from(obj3, 'utf-8'),
+    Buffer.from(obj4Start, 'utf-8'),
+    streamBuf,
+    Buffer.from(obj4End, 'utf-8'),
+    Buffer.from(obj5, 'utf-8'),
+    Buffer.from(xref, 'utf-8'),
+    Buffer.from(trailer, 'utf-8')
+  ]);
 };
 
 // @desc    Get all resources with search and filters
@@ -285,6 +291,10 @@ const downloadResource = async (req, res) => {
       : path.join(uploadDir, resource.filePath);
 
     if (!fs.existsSync(fullFilePath)) {
+      const parentDir = path.dirname(fullFilePath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
       const ext = path.extname(resource.fileName || fullFilePath).toLowerCase();
       if (ext === '.pdf' || !ext) {
         fs.writeFileSync(
@@ -423,6 +433,10 @@ const previewResource = async (req, res) => {
       : path.join(uploadDir, resource.filePath);
 
     if (!fs.existsSync(fullFilePath)) {
+      const parentDir = path.dirname(fullFilePath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
       const ext = path.extname(resource.fileName || fullFilePath).toLowerCase();
       if (ext === '.pdf' || !ext) {
         fs.writeFileSync(
