@@ -27,6 +27,15 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static uploads if directly accessed
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Root endpoint (for UptimeRobot keep-alive and uptime monitors)
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'EduShare Backend API is running successfully',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Health check route
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'EduShare Backend API is running successfully' });
