@@ -158,10 +158,3 @@ Users can create fresh accounts via the **Register** page (`/register`) to start
 
 ---
 
-## 9. Future Expansion Roadmap
-
-The code is structured with clean boundaries to allow rapid expansion in upcoming project phases:
-
-- **Phase 2:** Resource rating (1–5 stars), peer reviews & comments, bookmarks/favorites, and admin moderation dashboard.
-- **Phase 3:** Abuse reporting, real-time download/activity notifications (Socket.IO), and analytics graphs.
-- **Phase 4:** AI-assisted subject tagging, duplicate document detection, syllabus-based recommendations, and OCR for handwritten notes.
