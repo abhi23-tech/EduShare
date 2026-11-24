@@ -443,8 +443,11 @@ const deleteResource = async (req, res) => {
       });
     }
 
-    // Ensure the logged-in user is the owner
-    if (resource.uploadedBy.toString() !== req.user._id.toString()) {
+    // Ensure the logged-in user is the owner OR an admin
+    const isOwner = resource.uploadedBy && resource.uploadedBy.toString() === req.user._id.toString();
+    const isAdmin = req.user && req.user.role === 'admin';
+
+    if (!isOwner && !isAdmin) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete this resource',
